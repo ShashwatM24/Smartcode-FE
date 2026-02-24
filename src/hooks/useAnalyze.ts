@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { githubService } from '@/services/githubService';
 import { complexityScoreToLabel, getLanguageColor } from '@/utils';
 import type { AnalysisObject, AnalysisResult } from '@/types';
-import { MOCK_ANALYSIS_RESULT } from '@/data/mockAnalysis';
+import { fetchRepoAnalysis } from '@/services/githubApiService';
 
 const POLL_INTERVAL_MS = 2_000;
 const TIMEOUT_MS = 120_000;
@@ -68,11 +68,14 @@ export function useAnalyze(repo: string | null): UseAnalyzeState {
         } catch (err) {
             const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
 
-            // ── Demo mode: backend not reachable ──────────────────────────────
-            if (isNetworkError(msg)) {
-                // Simulate a brief loading delay so the loading UI is visible
-                await new Promise((r) => setTimeout(r, 1800));
-                setState({ phase: 'completed', result: MOCK_ANALYSIS_RESULT });
+            // ── Offline mode: call GitHub API directly ────────────────────────
+            if (isNetworkError(msg) && repo) {
+                try {
+                    const result = await fetchRepoAnalysis(repo);
+                    setState({ phase: 'completed', result });
+                } catch (ghErr) {
+                    setState({ phase: 'error', message: ghErr instanceof Error ? ghErr.message : 'GitHub API fetch failed' });
+                }
                 return;
             }
 
@@ -110,10 +113,15 @@ export function useAnalyze(repo: string | null): UseAnalyzeState {
                 // status === 'processing' → stay in polling, do nothing
             } catch (err) {
                 clearTimers();
-                // If polling also fails with network error, fall back to demo
+                // If polling also fails with network error, fall back to GitHub API
                 const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-                if (isNetworkError(msg)) {
-                    setState({ phase: 'completed', result: MOCK_ANALYSIS_RESULT });
+                if (isNetworkError(msg) && repo) {
+                    try {
+                        const result = await fetchRepoAnalysis(repo);
+                        setState({ phase: 'completed', result });
+                    } catch {
+                        setState({ phase: 'error', message: 'Cannot reach backend or GitHub API.' });
+                    }
                 } else {
                     setState({ phase: 'error', message: err instanceof Error ? err.message : 'Polling error' });
                 }
